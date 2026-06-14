@@ -1629,14 +1629,13 @@ def run_conversation(
                     )
 
                     # Extract actual cost from provider response headers
-                    # (OpenRouter returns x-request-cost on every completion).
+                    # via agent._last_actual_cost, which is set by an httpx
+                    # event hook on the per-request client.
                     actual_cost_usd = None
                     try:
-                        raw_resp = getattr(response, '_response', None)
-                        if raw_resp is not None:
-                            actual_cost_str = raw_resp.headers.get('x-request-cost')
-                            if actual_cost_str:
-                                actual_cost_usd = float(actual_cost_str)
+                        _last = getattr(agent, "_last_actual_cost", None)
+                        if _last is not None:
+                            actual_cost_usd = _last
                     except Exception:
                         pass
 

@@ -1419,6 +1419,34 @@ def create_openai_client(agent, client_kwargs: dict, *, reason: str, shared: boo
     if "http_client" not in client_kwargs:
         keepalive_http = agent._build_keepalive_http_client(client_kwargs.get("base_url", ""))
         if keepalive_http is not None:
+            # Add event hooks to capture OpenRouter x-request-cost header
+            # as the actual (not estimated) cost per API call.
+            # Cleared before each request so stale values aren't read.
+            try:
+                _existing_hooks = dict(getattr(keepalive_http, "event_hooks", {}) or {})
+                _response_hooks = list(_existing_hooks.get("response", []))
+                _request_hooks = list(_existing_hooks.get("request", []))
+
+                def _clear_actual_cost(request):
+                    agent._last_actual_cost = None
+
+                def _capture_actual_cost(response):
+                    try:
+                        cost_str = response.headers.get("x-request-cost")
+                        if cost_str:
+                            agent._last_actual_cost = float(cost_str)
+                    except Exception:
+                        pass
+                    return response
+
+                _request_hooks.append(_clear_actual_cost)
+                _response_hooks.append(_capture_actual_cost)
+                keepalive_http.event_hooks = {
+                    "request": _request_hooks,
+                    "response": _response_hooks,
+                }
+            except Exception:
+                pass
             client_kwargs["http_client"] = keepalive_http
     # Uses the module-level `OpenAI` name, resolved lazily on first
     # access via __getattr__ below. Tests patch via `run_agent.OpenAI`.
