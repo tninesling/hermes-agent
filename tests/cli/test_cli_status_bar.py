@@ -10,6 +10,7 @@ from cli import HermesCLI
 def _make_cli(model: str = "anthropic/claude-sonnet-4-20250514"):
     cli_obj = HermesCLI.__new__(HermesCLI)
     cli_obj.model = model
+    cli_obj.config = {}
     cli_obj.session_start = datetime.now() - timedelta(minutes=14, seconds=32)
     cli_obj.conversation_history = [{"role": "user", "content": "hi"}]
     cli_obj.agent = None
@@ -30,6 +31,8 @@ def _attach_agent(
     context_tokens: int,
     context_length: int,
     compressions: int = 0,
+    estimated_cost_usd: float = 0.0,
+    cost_status: str = "estimated",
 ):
     cli_obj.agent = SimpleNamespace(
         model=cli_obj.model,
@@ -43,6 +46,8 @@ def _attach_agent(
         session_completion_tokens=completion_tokens,
         session_total_tokens=total_tokens,
         session_api_calls=api_calls,
+        session_estimated_cost_usd=estimated_cost_usd,
+        session_cost_status=cost_status,
         get_rate_limit_state=lambda: None,
         context_compressor=SimpleNamespace(
             last_prompt_tokens=context_tokens,
@@ -124,7 +129,7 @@ class TestCLIStatusBar:
         # as a one-cell terminal rather than falling back to a fake wide width.
         assert cli_mod._estimate_tui_input_height(["abcd"], "", 0) == 4
 
-    def test_build_status_bar_text_no_cost_in_status_bar(self):
+    def test_build_status_bar_text_hides_cost_by_default(self):
         cli_obj = _attach_agent(
             _make_cli(),
             prompt_tokens=10000,
@@ -133,10 +138,48 @@ class TestCLIStatusBar:
             api_calls=7,
             context_tokens=50000,
             context_length=200_000,
+            estimated_cost_usd=0.06,
         )
 
         text = cli_obj._build_status_bar_text(width=120)
-        assert "$" not in text  # cost is never shown in status bar
+        assert "$" not in text  # cost is hidden unless display.show_cost is enabled
+
+    def test_build_status_bar_text_shows_cost_when_enabled(self):
+        cli_obj = _attach_agent(
+            _make_cli(),
+            prompt_tokens=10000,
+            completion_tokens=5000,
+            total_tokens=15000,
+            api_calls=7,
+            context_tokens=50000,
+            context_length=200_000,
+            estimated_cost_usd=0.06,
+        )
+        cli_obj.config = {"display": {"show_cost": True}}
+
+        text = cli_obj._build_status_bar_text(width=120)
+
+        assert "claude-sonnet-4-20250514" in text
+        assert "~$0.06" in text
+        assert "50K/200K" in text
+        assert "15m" in text
+
+    def test_build_status_bar_text_hides_cost_when_no_api_calls(self):
+        cli_obj = _attach_agent(
+            _make_cli(),
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            api_calls=0,
+            context_tokens=0,
+            context_length=200_000,
+            estimated_cost_usd=0.0,
+        )
+        cli_obj.config = {"display": {"show_cost": True}}
+
+        text = cli_obj._build_status_bar_text(width=120)
+
+        assert "$" not in text  # no calls yet, so cost label is omitted
 
     def test_build_status_bar_text_collapses_for_narrow_terminal(self):
         cli_obj = _attach_agent(
@@ -275,6 +318,45 @@ class TestCLIStatusBar:
         frag_texts = [text for _, text in frags]
 
         assert not any("🗜️" in t for t in frag_texts)
+
+    def test_cost_in_wide_fragments_when_enabled(self):
+        cli_obj = _attach_agent(
+            _make_cli(),
+            prompt_tokens=10_230,
+            completion_tokens=2_220,
+            total_tokens=12_450,
+            api_calls=7,
+            context_tokens=12_450,
+            context_length=200_000,
+            estimated_cost_usd=0.0612,
+        )
+        cli_obj._status_bar_visible = True
+        cli_obj.config = {"display": {"show_cost": True}}
+
+        frags = cli_obj._get_status_bar_fragments()
+        frag_texts = [text for _, text in frags]
+        full = "".join(frag_texts)
+
+        assert "~$0.06" in full
+
+    def test_cost_absent_from_fragments_by_default(self):
+        cli_obj = _attach_agent(
+            _make_cli(),
+            prompt_tokens=10_230,
+            completion_tokens=2_220,
+            total_tokens=12_450,
+            api_calls=7,
+            context_tokens=12_450,
+            context_length=200_000,
+            estimated_cost_usd=0.0612,
+        )
+        cli_obj._status_bar_visible = True
+
+        frags = cli_obj._get_status_bar_fragments()
+        frag_texts = [text for _, text in frags]
+        full = "".join(frag_texts)
+
+        assert "$" not in full
 
     def test_minimal_tui_chrome_threshold(self):
         cli_obj = _make_cli()

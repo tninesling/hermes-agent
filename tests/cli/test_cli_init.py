@@ -451,6 +451,54 @@ class TestHistoryDisplay:
         assert "Recent sessions" in output
         assert "Checking Running Hermes Agent" in output
 
+    def test_sessions_list_shows_cost_when_enabled(self, capsys):
+        """/sessions includes a Cost column when display.show_cost is True."""
+        cli = _make_cli(
+            config_overrides={
+                "display": {"compact": False, "tool_progress": "all", "show_cost": True}
+            }
+        )
+        cli.session_id = "current"
+        cli._session_db = MagicMock()
+        cli._session_db.list_sessions_rich.return_value = [
+            {
+                "id": "20260401_201329_d85961",
+                "title": "Checking Running Hermes Agent",
+                "preview": "check running gateways for hermes agent",
+                "last_active": 0,
+                "estimated_cost_usd": 0.0412,
+                "cost_status": "estimated",
+            },
+        ]
+
+        cli.process_command("/sessions")
+        output = capsys.readouterr().out
+
+        assert "Cost" in output
+        assert "~$0.04" in output
+
+    def test_sessions_list_hides_cost_when_disabled(self, capsys):
+        """/sessions omits the Cost column when display.show_cost is False."""
+        cli = _make_cli()
+        cli.session_id = "current"
+        cli._session_db = MagicMock()
+        cli._session_db.list_sessions_rich.return_value = [
+            {
+                "id": "20260401_201329_d85961",
+                "title": "Checking Running Hermes Agent",
+                "preview": "check running gateways for hermes agent",
+                "last_active": 0,
+                "estimated_cost_usd": 0.0412,
+                "cost_status": "estimated",
+            },
+        ]
+
+        cli.process_command("/sessions")
+        output = capsys.readouterr().out
+
+        assert "Cost" not in output
+        assert "~$0.04" not in output
+
     def test_sessions_with_target_delegates_to_resume(self):
         """/sessions <id_or_title> behaves identically to /resume <id_or_title>.
 

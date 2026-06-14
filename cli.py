@@ -3913,6 +3913,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
             "session_completion_tokens": 0,
             "session_total_tokens": 0,
             "session_api_calls": 0,
+            "session_estimated_cost_usd": 0.0,
+            "session_cost_status": "estimated",
             "compressions": 0,
             "active_background_tasks": 0,
             "active_background_processes": 0,
@@ -3948,6 +3950,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         snapshot["session_completion_tokens"] = getattr(agent, "session_completion_tokens", 0) or 0
         snapshot["session_total_tokens"] = getattr(agent, "session_total_tokens", 0) or 0
         snapshot["session_api_calls"] = getattr(agent, "session_api_calls", 0) or 0
+        snapshot["session_estimated_cost_usd"] = float(getattr(agent, "session_estimated_cost_usd", 0.0) or 0.0)
+        snapshot["session_cost_status"] = getattr(agent, "session_cost_status", "estimated") or "estimated"
 
         compressor = getattr(agent, "context_compressor", None)
         if compressor:
@@ -4160,6 +4164,34 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         cont = " | Continuous" if self._voice_continuous else ""
         return [("class:voice-status", f" 🎤 Voice mode{tts}{cont}  —  {label} to record ")]
 
+    def _format_cost_value(self, cost: Optional[float], cost_status: Optional[str]) -> str:
+        """Return a human-readable cost label, e.g. '$0.04' or '~$0.0012'."""
+        cost = float(cost or 0.0)
+        if cost >= 0.01:
+            cost_str = f"${cost:.2f}"
+        elif cost > 0:
+            cost_str = f"${cost:.4f}"
+        else:
+            cost_str = "$0.00"
+        prefix = "~" if cost_status == "estimated" else ""
+        return f"{prefix}{cost_str}"
+
+    def _format_status_bar_cost(self, snapshot: Dict[str, Any]) -> Optional[str]:
+        """Return a compact cost label for the status bar, or None when disabled."""
+        try:
+            show_cost = getattr(self, "config", {}).get("display", {}).get("show_cost", False)
+        except Exception:
+            show_cost = False
+        if not show_cost:
+            return None
+        calls = snapshot.get("session_api_calls", 0) or 0
+        if not calls:
+            return None
+        return self._format_cost_value(
+            snapshot.get("session_estimated_cost_usd"),
+            snapshot.get("session_cost_status"),
+        )
+
     def _build_status_bar_text(self, width: Optional[int] = None) -> str:
         """Return a compact one-line session status string for the TUI footer."""
         try:
@@ -4199,8 +4231,13 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
             else:
                 context_label = "ctx --"
 
+            cost_label = self._format_status_bar_cost(snapshot)
+
             compressions = snapshot.get("compressions", 0)
-            parts = [f"⚕ {snapshot['model_short']}", context_label, percent_label]
+            parts = [f"⚕ {snapshot['model_short']}", context_label]
+            if cost_label:
+                parts.append(cost_label)
+            parts.append(percent_label)
             if compressions:
                 parts.append(f"🗜️ {compressions}")
             bg_count = snapshot.get("active_background_tasks", 0)
@@ -4285,6 +4322,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                     else:
                         context_label = "ctx --"
 
+                    cost_label = self._format_status_bar_cost(snapshot)
+
                     bar_style = self._status_bar_context_style(percent)
                     compressions = snapshot.get("compressions", 0)
                     bg_count = snapshot.get("active_background_tasks", 0)
@@ -4294,11 +4333,18 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                         ("class:status-bar-strong", snapshot["model_short"]),
                         ("class:status-bar-dim", " │ "),
                         ("class:status-bar-dim", context_label),
+                    ]
+                    if cost_label:
+                        frags.extend([
+                            ("class:status-bar-dim", " │ "),
+                            ("class:status-bar-dim", cost_label),
+                        ])
+                    frags.extend([
                         ("class:status-bar-dim", " │ "),
                         (bar_style, self._build_context_bar(percent)),
                         ("class:status-bar-dim", " "),
                         (bar_style, percent_label),
-                    ]
+                    ])
                     if compressions:
                         frags.append(("class:status-bar-dim", " │ "))
                         frags.append((self._compression_count_style(compressions), f"🗜️ {compressions}"))
@@ -5802,19 +5848,37 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
 
         from hermes_cli.main import _relative_time
 
+        try:
+            show_cost = getattr(self, "config", {}).get("display", {}).get("show_cost", False)
+        except Exception:
+            show_cost = False
+
         print()
         if reason == "history":
             print("(._.) No messages in the current chat yet — here are recent sessions you can resume:")
         else:
             print("  Recent sessions:")
         print()
-        print(f"  {'#':<3} {'Title':<32} {'Preview':<40} {'Last Active':<13} {'ID'}")
-        print(f"  {'─' * 3} {'─' * 32} {'─' * 40} {'─' * 13} {'─' * 24}")
+
+        if show_cost:
+            print(f"  {'#':<3} {'Title':<32} {'Preview':<28} {'Cost':<11} {'Last Active':<13} {'ID'}")
+            print(f"  {'─' * 3} {'─' * 32} {'─' * 28} {'─' * 11} {'─' * 13} {'─' * 24}")
+        else:
+            print(f"  {'#':<3} {'Title':<32} {'Preview':<40} {'Last Active':<13} {'ID'}")
+            print(f"  {'─' * 3} {'─' * 32} {'─' * 40} {'─' * 13} {'─' * 24}")
         for idx, session in enumerate(sessions, start=1):
             title = session.get("title") or "—"
             preview = (session.get("preview") or "")[:38]
             last_active = _relative_time(session.get("last_active"))
-            print(f"  {idx:<3} {title:<32} {preview:<40} {last_active:<13} {session['id']}")
+            if show_cost:
+                preview = (session.get("preview") or "")[:26]
+                cost = self._format_cost_value(
+                    session.get("estimated_cost_usd"),
+                    session.get("cost_status"),
+                )
+                print(f"  {idx:<3} {title:<32} {preview:<28} {cost:<11} {last_active:<13} {session['id']}")
+            else:
+                print(f"  {idx:<3} {title:<32} {preview:<40} {last_active:<13} {session['id']}")
         print()
         print("  Use /resume <number>, /resume <session id>, or /resume <session title> to continue.")
         print("  Example: /resume 2")
