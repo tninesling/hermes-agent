@@ -780,7 +780,19 @@ def estimate_usage_cost(
     provider: Optional[str] = None,
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
+    actual_cost_usd: Optional[float] = None,
 ) -> CostResult:
+    # When the provider reports the actual cost (e.g. OpenRouter x-request-cost
+    # header), use it directly — no token-based estimation needed.
+    if actual_cost_usd is not None:
+        actual = Decimal(str(actual_cost_usd))
+        return CostResult(
+            amount_usd=actual,
+            status="actual",
+            source="provider_cost_api",
+            label=f"${actual_cost_usd:.4f}" if actual_cost_usd < 0.01 else f"${actual_cost_usd:.2f}",
+        )
+
     route = resolve_billing_route(model_name, provider=provider, base_url=base_url)
     if route.billing_mode == "subscription_included":
         return CostResult(

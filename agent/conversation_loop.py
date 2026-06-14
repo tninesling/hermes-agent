@@ -1628,12 +1628,25 @@ def run_conversation(
                         api_duration, _cache_pct,
                     )
 
+                    # Extract actual cost from provider response headers
+                    # (OpenRouter returns x-request-cost on every completion).
+                    actual_cost_usd = None
+                    try:
+                        raw_resp = getattr(response, '_response', None)
+                        if raw_resp is not None:
+                            actual_cost_str = raw_resp.headers.get('x-request-cost')
+                            if actual_cost_str:
+                                actual_cost_usd = float(actual_cost_str)
+                    except Exception:
+                        pass
+
                     cost_result = estimate_usage_cost(
                         agent.model,
                         canonical_usage,
                         provider=agent.provider,
                         base_url=agent.base_url,
                         api_key=getattr(agent, "api_key", ""),
+                        actual_cost_usd=actual_cost_usd,
                     )
                     if cost_result.amount_usd is not None:
                         agent.session_estimated_cost_usd += float(cost_result.amount_usd)
@@ -1666,6 +1679,7 @@ def run_conversation(
                                 reasoning_tokens=canonical_usage.reasoning_tokens,
                                 estimated_cost_usd=float(cost_result.amount_usd)
                                 if cost_result.amount_usd is not None else None,
+                                actual_cost_usd=actual_cost_usd,  # provider-reported actual cost
                                 cost_status=cost_result.status,
                                 cost_source=cost_result.source,
                                 billing_provider=agent.provider,
