@@ -8,8 +8,8 @@ import { $activeSessionId } from './session'
 
 // Native OS notifications (Electron `Notification`) — distinct from the in-app
 // toast feed in `notifications.ts`. Each kind is independently toggleable and
-// gated on window focus so we never interrupt the user about something already
-// on screen.
+// gated (window focus + active session) so we never interrupt the user about
+// something already on screen.
 export type NativeNotificationKind = 'approval' | 'backgroundDone' | 'input' | 'turnDone' | 'turnError'
 
 export const NATIVE_NOTIFICATION_KINDS: readonly NativeNotificationKind[] = [
@@ -48,13 +48,11 @@ function readPrefs(): NativeNotificationPrefs {
     const parsed = JSON.parse(raw) as Partial<NativeNotificationPrefs>
     const kinds = { ...DEFAULT_PREFS.kinds }
 
-    if (parsed.kinds && typeof parsed.kinds === 'object') {
-      for (const kind of NATIVE_NOTIFICATION_KINDS) {
-        const value = parsed.kinds[kind]
+    for (const kind of NATIVE_NOTIFICATION_KINDS) {
+      const value = parsed.kinds?.[kind]
 
-        if (typeof value === 'boolean') {
-          kinds[kind] = value
-        }
+      if (typeof value === 'boolean') {
+        kinds[kind] = value
       }
     }
 

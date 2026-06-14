@@ -1,10 +1,12 @@
 import { useStore } from '@nanostores/react'
+import type { ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { Bell } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import {
   $nativeNotifyPrefs,
   NATIVE_NOTIFICATION_KINDS,
@@ -15,6 +17,38 @@ import {
 import { notify } from '@/store/notifications'
 
 import { ListRow, SectionHeading, SettingsContent } from './primitives'
+
+const CAPTION = 'text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)'
+
+function Caption({ children, className }: { children: ReactNode; className?: string }) {
+  return <p className={cn(CAPTION, className)}>{children}</p>
+}
+
+function ToggleRow(props: {
+  checked: boolean
+  description: string
+  disabled?: boolean
+  label: string
+  onChange: (on: boolean) => void
+}) {
+  return (
+    <ListRow
+      action={
+        <Switch
+          aria-label={props.label}
+          checked={props.checked}
+          disabled={props.disabled}
+          onCheckedChange={on => {
+            triggerHaptic('selection')
+            props.onChange(on)
+          }}
+        />
+      }
+      description={props.description}
+      title={props.label}
+    />
+  )
+}
 
 export function NotificationsSettings() {
   const { t } = useI18n()
@@ -30,64 +64,34 @@ export function NotificationsSettings() {
   return (
     <SettingsContent>
       <SectionHeading icon={Bell} title={copy.title} />
-      <p className="mb-2 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
-        {copy.intro}
-      </p>
+      <Caption className="mb-2 leading-(--conversation-caption-line-height)">{copy.intro}</Caption>
 
-      <ListRow
-        action={
-          <Switch
-            aria-label={copy.enableAll}
-            checked={prefs.enabled}
-            onCheckedChange={value => {
-              triggerHaptic('selection')
-              setNativeNotifyEnabled(value)
-            }}
-          />
-        }
+      <ToggleRow
+        checked={prefs.enabled}
         description={copy.enableAllDesc}
-        title={copy.enableAll}
+        label={copy.enableAll}
+        onChange={setNativeNotifyEnabled}
       />
 
       <div className="my-1 h-px bg-border/30" />
 
-      {NATIVE_NOTIFICATION_KINDS.map(kind => {
-        const kindCopy = copy.kinds[kind]
-
-        return (
-          <ListRow
-            action={
-              <Switch
-                aria-label={kindCopy.label}
-                checked={prefs.enabled && prefs.kinds[kind]}
-                disabled={!prefs.enabled}
-                onCheckedChange={value => {
-                  triggerHaptic('selection')
-                  setNativeNotifyKind(kind, value)
-                }}
-              />
-            }
-            description={kindCopy.description}
-            key={kind}
-            title={kindCopy.label}
-          />
-        )
-      })}
+      {NATIVE_NOTIFICATION_KINDS.map(kind => (
+        <ToggleRow
+          checked={prefs.enabled && prefs.kinds[kind]}
+          description={copy.kinds[kind].description}
+          disabled={!prefs.enabled}
+          key={kind}
+          label={copy.kinds[kind].label}
+          onChange={on => setNativeNotifyKind(kind, on)}
+        />
+      ))}
 
       <div className="mt-4 flex flex-col gap-2">
-        <Button
-          className="self-start"
-          onClick={() => void runTest()}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
+        <Button className="self-start" onClick={() => void runTest()} size="sm" type="button" variant="outline">
           <Bell />
           {copy.test}
         </Button>
-        <p className="text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)">
-          {copy.focusedHint}
-        </p>
+        <Caption>{copy.focusedHint}</Caption>
       </div>
     </SettingsContent>
   )
